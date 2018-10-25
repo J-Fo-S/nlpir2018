@@ -3,18 +3,15 @@ import argparse
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+import random
 from collections import Counter
 from sklearn.feature_extraction.text import CountVectorizer
-
-def add_arguments(parser):
-    parser.add_argument("--personify", type=str, default=False, help="match sentiment to speaker")
-    parser.add_argument("--dataclean", type=str, default=True, help="remove extra classes")
+import mlp
+import train
 
 
-#usage
-#if args.personify == False:
-
-#elif args.personify == True:
+#def add_arguments(parser):
+    #parser.add_argument("--dataclean", type=str, default=True, help="remove extra classes")
 
 def load_friends_json(data_path):
     friends_path = [os.path.join(data_path,file) for file in os.listdir(data_path) if file.endswith(".json")]
@@ -41,20 +38,15 @@ def load_friends_json(data_path):
                 friends_dev = json.load(f)
                 print("1st dev utterance: %s" % (friends_dev[0][0]['utterance']))
 
-    if args.dataclean == True:
-        friends_train = remove_data_classes(friends_train)
-        friends_test = remove_data_classes(friends_test)
-        friends_dev = remove_data_classes(friends_dev)
+    #if args.dataclean == True:
+    friends_train = remove_data_classes(friends_train)
+    friends_test = remove_data_classes(friends_test)
+    friends_dev = remove_data_classes(friends_dev)
 
     return friends_train, friends_test, friends_dev
 
 #remove extra classes
 def remove_data_classes(data):
-    #data_remove = [print(data.pop()) for i in data if data[:][:][:] == 'surprise' or 'non-neutral' or 'fear']
-    #data_remove = filter(lambda x:x[:] == "fear" or "non-neutral" or "surprise", data)
-    #data_remove = [[subl for subl in nested if subl != "fear" or "non-neutral" or "surprise"] for nested in data]
-    #data_remove = [data.remove(subl) for subl in data if subl == "fear" or "non-neutral" or "surprise"]
-    #data_remove = [[item for item in seq if item != "fear" or "non-neutral" or "surprise"] for seq in data]
     count = 0
     data_remove = []
     for r in range(len(data)):
@@ -64,8 +56,35 @@ def remove_data_classes(data):
                 count += 1
                 data_remove.append(data[r][c])
     print("entries %d " % (count))
-
     return data_remove
+
+def get_num_classes(labels):
+    """Gets the total number of classes.
+    # Arguments
+        labels: list, label values.
+            There should be at lease one sample for values in the
+            range (0, num_classes -1)
+    # Returns
+        int, total number of classes.
+    # Raises
+        ValueError: if any label value in the range(0, num_classes - 1)
+            is missing or if number of classes is <= 1.
+    """
+    num_classes = max(labels) + 1
+    missing_classes = [i for i in range(num_classes) if i not in labels]
+    if len(missing_classes):
+        raise ValueError('Missing samples with label value(s) '
+                         '{missing_classes}. Please make sure you have '
+                         'at least one sample for every label value '
+                         'in the range(0, {max_class})'.format(
+                            missing_classes=missing_classes,
+                            max_class=num_classes - 1))
+
+    if num_classes <= 1:
+        raise ValueError('Invalid number of labels: {num_classes}.'
+                         'Please make sure there are at least two classes '
+                         'of samples'.format(num_classes=num_classes))
+    return num_classes
 
 def text_label_vector(data):
     tlv = get_annotations(data)
@@ -76,9 +95,19 @@ def text_label_vector(data):
     #reduce 3 removed data columns
     tlv = np.delete(tlv, np.s_[:-4], axis=1)
     labels = np.asarray(get_emotions(data))
+    #because of data corruption (e.g. can't guarantee determining 'neutral' with removed annotations)
+    #tlv_one = np.max(tlv,axis=1) #can't do this way
+    #ignore annotations and label ints by class
+    tlv_one = np.array(labels)
+    tlv_one[tlv_one == 'neutral'] = 0
+    tlv_one[tlv_one == 'joy'] = 1
+    tlv_one[tlv_one == 'anger'] = 2
+    tlv_one[tlv_one == 'sadness'] = 3
+
     labels = labels[:,np.newaxis]
-    tlv_one = np.expand_dims(np.max(tlv,axis=1),axis=1)
-    labels = np.concatenate((tlv_one,labels),axis=1)
+    tlv_one = tlv_one.astype(int)
+    tlv_add_dim = np.expand_dims(np.max(tlv,axis=1),axis=1)
+    labels = np.concatenate((tlv_add_dim,labels),axis=1)
     return tlv, tlv_one, labels
 
 # the following "get" funcs return a vector of each attribute
@@ -118,7 +147,7 @@ def get_num_words_per_sample(data):
     """Returns the median number of words per sample given corpus.
 
     # Arguments
-        sample_texts: list, sample texts.
+        sample_texts: list
 
     # Returns
         int, median number of words per sample.
@@ -133,14 +162,15 @@ def get_num_words_per_sample(data):
     plot_frequency_distribution_of_ngrams(word_lines, (4,4))
 
     print("median words per utterance %.1f" % (words_median))
-    #return np.median([len(s.split()) for s in num_words])
+    return words_median
 
 def get_class_distribution(data):
+    #Returns and plots bar chart for data class distribution
     classes = get_emotions(data)
     count_map = Counter(classes)
-    #print(list(count_map.keys()))
     plot_class_distribution(count_map)
     print("samples by emotion class %s " % (list(count_map.most_common())))
+    return count_map
 
 def plot_frequency_distribution_of_ngrams(sample_texts,
                                           ngram_range=(1, 2),
@@ -216,7 +246,24 @@ def plot_class_distribution(count_map):
     plt.title('Sample class distribution of %d total samples ' % (np.sum(list(count_map.values()))))
     plt.show()
 
+def load_main(seed=123):
+    train_data,test_data,_ = load_friends_json(os.getcwd()+'/data/friends/')
+    train_texts = get_utterances(train_data)
+    _,train_labels,_ = text_label_vector(train_data)
+    test_texts = get_utterances(test_data)
+    _,test_labels,_ = text_label_vector(test_data)
+    # Shuffle the training data and labels.
+    print(train_texts[:5], train_labels[:5])
+    random.seed(seed)
+    random.shuffle(train_texts)
+    random.seed(seed)
+    random.shuffle(train_labels)
+    print(train_texts[:5], train_labels[:5])
+    print(len(train_texts), np.array(train_labels).shape)
+    return ((train_texts, np.array(train_labels)),(test_texts, np.array(test_labels)))
 
-parser = argparse.ArgumentParser()
-add_arguments(parser)
-args = parser.parse_args()
+
+#parser = argparse.ArgumentParser('data_load')
+#add_arguments(parser)
+#args = parser.parse_args()
+#mlp.add_arguments(parser)
