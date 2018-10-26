@@ -8,42 +8,49 @@ from collections import Counter
 from sklearn.feature_extraction.text import CountVectorizer
 import mlp
 import train
+import re
 
 
 #def add_arguments(parser):
     #parser.add_argument("--dataclean", type=str, default=True, help="remove extra classes")
 
-def load_friends_json(data_path):
+def load_friends_json(data_path, datadir):
     friends_path = [os.path.join(data_path,file) for file in os.listdir(data_path) if file.endswith(".json")]
     print(len(friends_path), type(friends_path), friends_path[0])
   
     # JSON is stored as nested lists of 80 dict conversations
     # note this method reduces nested lists to just a list of dicts
+    friends_train = []
+    friends_test = []
+    friends_dev = []
     for i in range(len(friends_path)):
         with open(friends_path[i], 'r') as f:
             #print(f)
             if "train" in f.name:
-                friends_train = json.load(f)
+                friends_train.extend(json.load(f))
                 print("1st train utterance: %s" % (friends_train[0][0]['utterance']))
 
     for i in range(len(friends_path)):
         with open(friends_path[i], 'r') as f:
             if "test" in f.name:
-                friends_test = json.load(f)
+                friends_test.extend(json.load(f))
                 print("1st test utterance: %s" % (friends_test[0][0]['utterance']))
 
     for i in range(len(friends_path)):
         with open(friends_path[i], 'r') as f:
             if "dev" in f.name:
-                friends_dev = json.load(f)
+                friends_dev.extend(json.load(f))
                 print("1st dev utterance: %s" % (friends_dev[0][0]['utterance']))
 
-    #if args.dataclean == True:
     friends_train = remove_data_classes(friends_train)
     friends_test = remove_data_classes(friends_test)
     friends_dev = remove_data_classes(friends_dev)
-
-    return friends_train, friends_test, friends_dev
+    
+    if datadir == '/combined/':
+        friends_test.extend(friends_dev)
+        return friends_train, friends_test, None
+    else:
+        return friends_train, friends_test, friends_dev
 
 #remove extra classes
 def remove_data_classes(data):
@@ -55,7 +62,7 @@ def remove_data_classes(data):
                 and 'disgust' not in data[r][c]['emotion'] and 'non-neutral' not in data[r][c]['emotion']):
                 count += 1
                 data_remove.append(data[r][c])
-    print("entries %d " % (count))
+    #print("entries %d " % (count))
     return data_remove
 
 def get_num_classes(labels):
@@ -124,7 +131,11 @@ def get_utterances(data):
     for r in range(len(data)):
         #for c in range(len(data[r])):
         #print(data[r]['utterance'])
-        utterances.append(data[r]['utterance'])
+        #remove digits and commas
+        uttered = re.sub("\d+", "",str(data[r]['utterance']))
+        uttered = uttered.replace(',','')
+        utterances.append(uttered)
+        #remove unwanted characters 
     return utterances
 
 def get_emotions(data):
@@ -246,20 +257,20 @@ def plot_class_distribution(count_map):
     plt.title('Sample class distribution of %d total samples ' % (np.sum(list(count_map.values()))))
     plt.show()
 
-def load_main(seed=123):
-    train_data,test_data,_ = load_friends_json(os.getcwd()+'/data/friends/')
+def load_main(datadir, seed=123):
+    train_data,test_data,_ = load_friends_json(os.getcwd()+'/data'+datadir, datadir)
     train_texts = get_utterances(train_data)
     _,train_labels,_ = text_label_vector(train_data)
     test_texts = get_utterances(test_data)
     _,test_labels,_ = text_label_vector(test_data)
     # Shuffle the training data and labels.
-    print(train_texts[:5], train_labels[:5])
+    #print(train_texts[:5], train_labels[:5])
     random.seed(seed)
     random.shuffle(train_texts)
     random.seed(seed)
     random.shuffle(train_labels)
-    print(train_texts[:5], train_labels[:5])
-    print(len(train_texts), np.array(train_labels).shape)
+    #print(train_texts[:5], train_labels[:5])
+    #print(len(train_texts), np.array(train_labels).shape)
     return ((train_texts, np.array(train_labels)),(test_texts, np.array(test_labels)))
 
 
