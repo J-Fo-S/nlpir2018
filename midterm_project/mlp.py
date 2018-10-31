@@ -229,6 +229,15 @@ def train_ngram_model(data,
     callbacks = [tf.keras.callbacks.EarlyStopping(
         monitor='val_loss', patience=3)]
 
+    #class weight for unbalanced classes
+    if FLAGS.class_weights == True:
+        class_weight = {0: 1.,
+                        1: 2.,
+                        2: 4.,
+                        3: 4.}
+    else: 
+        class_weight = None
+
     # Train and validate model.
     history = model.fit(
             x_train,
@@ -237,7 +246,8 @@ def train_ngram_model(data,
             callbacks=callbacks,
             validation_data=(x_val, val_labels),
             verbose=2,  # Logs once per epoch.
-            batch_size=batch_size)
+            batch_size=batch_size,
+            class_weight = class_weight)
 
     # Print results.
     history = history.history
@@ -347,9 +357,11 @@ if __name__ == '__main__':
     parser.add_argument('--NGRAM_RANGE', type=int, default=(2,5),
                         help='input data directory')
     parser.add_argument('--TOKEN_MODE', type=str, default='char_wb',
-                        help='options = char, char_wb, word, both')
+                        help='options = char, char_wb, word')
     parser.add_argument('--word_plus_char', type=int, default=False,
                         help='options = True or False to combine features')
+    parser.add_argument('--class_weights', type=int, default=False,
+                        help='options = True or False to balance classes some')
     
     FLAGS, unparsed = parser.parse_known_args()
 
